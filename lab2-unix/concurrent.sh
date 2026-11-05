@@ -1,31 +1,25 @@
 #!/bin/sh
 
 DIR=/data
-LOCK="$DIR/.lock"
-
 ID=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 N=0
+NAME=
+
+trap '[ -n "$NAME" ] && rm -f "$DIR/$NAME"; exit 0' INT TERM
 
 while true; do
     NAME=$(
-        (
-            flock 9
-            i=1
-            while [ -e "$DIR/$(printf '%03d' "$i")" ]; do
-                i=$((i + 1))
-            done
-            NAME=$(printf '%03d' "$i")
-            : > "$DIR/$NAME"
-            echo "$NAME"
-        ) 9>"$LOCK"
+        exec 9>"$DIR/.lock"
+        flock 9 || exit 1
+        i=1
+        while [ -e "$DIR/$(printf '%03d' "$i")" ]; do i=$((i + 1)); done
+        F=$(printf '%03d' "$i")
+        printf '%s\n%s\n' "$ID" "$((N + 1))" > "$DIR/$F" && echo "$F"
     )
-
+    [ -n "$NAME" ] || { sleep 1; continue; }
     N=$((N + 1))
-    printf '%s\n%s\n' "$ID" "$N" > "$DIR/$NAME"
-
     sleep 1
-
     rm -f "$DIR/$NAME"
-
+    NAME=
     sleep 1
 done
