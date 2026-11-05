@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <cstdio>
 
+const int EVENTS = 10;   // количество событий до завершения
+
 // Условное событие: несериализуемые данные, передаются по указателю
 class Event
 {
@@ -13,35 +15,62 @@ public:
 class Monitor
 {
 public:
+    ~Monitor()
+    {
+        pthread_cond_destroy(&condition);
+        pthread_mutex_destroy(&mutex);
+    }
+
     // Поток-поставщик
-    bool provide(int id)
+    void provide(Event* event)
     {
         pthread_mutex_lock(&mutex);
-        if (ready)                      // предыдущее событие ещё не обработано
-        {
-            pthread_mutex_unlock(&mutex);
-            return false;               // повторить попытку позже
-        }
-        Event* event = new Event(id);   // создать событие
+        while (ready)                   // ждём, пока предыдущее событие обработают
+            pthread_cond_wait(&condition, &mutex);
+        pthread_mutex_unlock(&mutex);
+
+        std::printf("Отправлено событие %d\n", event->id);
+
+        pthread_mutex_lock(&mutex);
         data = event;                   // записать данные в монитор
         ready = true;
-        std::printf("Отправлено событие %d\n", event->id);
+        pthread_cond_signal(&condition);
+        pthread_mutex_unlock(&mutex);
+    }
+
+    // Поток-потребитель; возвращает false, когда монитор остановлен
+    bool consume()
+    {
+        pthread_mutex_lock(&mutex);
+        while (!ready && !stopping)     // защита от ложных пробуждений
+            pthread_cond_wait(&condition, &mutex);
+        if (!ready)                     // событий нет и поставщик закончил
+        {
+            pthread_mutex_unlock(&mutex);
+            return false;
+        }
+        Event* event = static_cast<Event*>(data);   // извлечь данные
+        data = nullptr;
+        pthread_mutex_unlock(&mutex);
+
+        std::printf("Обработано событие %d\n", event->id);
+        delete event;                   // обработать событие
+
+        pthread_mutex_lock(&mutex);
+        ready = false;                  // обработка завершена
         pthread_cond_signal(&condition);
         pthread_mutex_unlock(&mutex);
         return true;
     }
 
-    // Поток-потребитель
-    void consume()
+    // Завершение монитора
+    void stop()
     {
         pthread_mutex_lock(&mutex);
-        while (!ready)                  // защита от ложных пробуждений
+        while (ready)                   // дождаться обработки последнего события
             pthread_cond_wait(&condition, &mutex);
-        Event* event = static_cast<Event*>(data);   // извлечь данные
-        data = nullptr;
-        ready = false;
-        std::printf("Обработано событие %d\n", event->id);
-        delete event;                   // обработать событие
+        stopping = true;
+        pthread_cond_broadcast(&condition);
         pthread_mutex_unlock(&mutex);
     }
 
@@ -49,6 +78,7 @@ private:
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
     pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
     bool ready = false;
+    bool stopping = false;
     void* data = nullptr;
 };
 
@@ -58,13 +88,12 @@ public:
     static void* run(void* arg)
     {
         Monitor* monitor = static_cast<Monitor*>(arg);
-        int id = 1;
-        while (true)
+        for (int id = 1; id <= EVENTS; ++id)
         {
             sleep(1);
-            if (monitor->provide(id))
-                ++id;
+            monitor->provide(new Event(id));
         }
+        monitor->stop();
         return nullptr;
     }
 };
@@ -75,8 +104,8 @@ public:
     static void* run(void* arg)
     {
         Monitor* monitor = static_cast<Monitor*>(arg);
-        while (true)
-            monitor->consume();
+        while (monitor->consume())
+            ;
         return nullptr;
     }
 };
