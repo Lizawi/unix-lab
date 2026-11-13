@@ -2,9 +2,8 @@
 #include <unistd.h>
 #include <cstdio>
 
-const int EVENTS = 10;   // количество событий до завершения
+const int EVENTS = 10;
 
-// Условное событие: несериализуемые данные, передаются по указателю
 class Event
 {
 public:
@@ -21,53 +20,50 @@ public:
         pthread_mutex_destroy(&mutex);
     }
 
-    // Поток-поставщик
     void provide(Event* event)
     {
         pthread_mutex_lock(&mutex);
-        while (ready)                   // ждём, пока предыдущее событие обработают
+        while (ready)
             pthread_cond_wait(&condition, &mutex);
         pthread_mutex_unlock(&mutex);
 
         std::printf("Отправлено событие %d\n", event->id);
 
         pthread_mutex_lock(&mutex);
-        data = event;                   // записать данные в монитор
+        data = event;
         ready = true;
         pthread_cond_signal(&condition);
         pthread_mutex_unlock(&mutex);
     }
 
-    // Поток-потребитель; возвращает false, когда монитор остановлен
     bool consume()
     {
         pthread_mutex_lock(&mutex);
-        while (!ready && !stopping)     // защита от ложных пробуждений
+        while (!ready && !stopping)
             pthread_cond_wait(&condition, &mutex);
-        if (!ready)                     // событий нет и поставщик закончил
+        if (!ready)
         {
             pthread_mutex_unlock(&mutex);
             return false;
         }
-        Event* event = static_cast<Event*>(data);   // извлечь данные
+        Event* event = static_cast<Event*>(data);
         data = nullptr;
         pthread_mutex_unlock(&mutex);
 
         std::printf("Обработано событие %d\n", event->id);
-        delete event;                   // обработать событие
+        delete event;
 
         pthread_mutex_lock(&mutex);
-        ready = false;                  // обработка завершена
+        ready = false;
         pthread_cond_signal(&condition);
         pthread_mutex_unlock(&mutex);
         return true;
     }
 
-    // Завершение монитора
     void stop()
     {
         pthread_mutex_lock(&mutex);
-        while (ready)                   // дождаться обработки последнего события
+        while (ready)
             pthread_cond_wait(&condition, &mutex);
         stopping = true;
         pthread_cond_broadcast(&condition);
