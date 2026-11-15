@@ -8,7 +8,6 @@
 
 namespace fs = std::filesystem;
 
-// Хэш FNV-1a (64 бита), файл читается блоками
 static bool fileHash(const fs::path &path, uint64_t &hash) {
     std::ifstream in(path, std::ios::binary);
     if (!in)
@@ -25,7 +24,6 @@ static bool fileHash(const fs::path &path, uint64_t &hash) {
     return !in.bad();
 }
 
-// Побайтовое сравнение: защита от совпадения хэшей у разных файлов
 static bool sameContent(const fs::path &a, const fs::path &b) {
     std::error_code ec1, ec2;
     if (fs::file_size(a, ec1) != fs::file_size(b, ec2) || ec1 || ec2)
@@ -45,8 +43,6 @@ static bool sameContent(const fs::path &a, const fs::path &b) {
     return true;
 }
 
-// Замена дубликата жёсткой ссылкой: ссылка под временным именем, затем rename.
-// При ошибке дубликат остаётся на месте.
 static bool replaceWithLink(const fs::path &original, const fs::path &duplicate) {
     fs::path tmp = duplicate;
     tmp += ".hardlink.tmp";
@@ -69,7 +65,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // 1. Обход каталога и список файлов
     std::vector<fs::path> files;
     std::error_code ec;
     fs::recursive_directory_iterator it(argv[1], fs::directory_options::skip_permission_denied, ec);
@@ -77,7 +72,6 @@ int main(int argc, char *argv[]) {
         if (fs::is_regular_file(it->symlink_status()))
             files.push_back(it->path());
 
-    // 2. Хэш каждого файла, 3. замена дубликатов жёсткими ссылками
     std::unordered_map<uint64_t, std::vector<fs::path>> kept;
     int linked = 0, errors = 0;
 
